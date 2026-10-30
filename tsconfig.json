@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    // Cible ECMAScript moderne pour bénéficier des optimisations du moteur V8
+    "target": "ES2022",
+    // Système de modules Node.js moderne
+    "module": "NodeNext",
+    // Résolution des modules conforme aux standards Node.js
+    "moduleResolution": "NodeNext",
+    // Répertoire de destination des fichiers compilés en JavaScript
+    "outDir": "./dist",
+    // Répertoire racine du code source TypeScript
+    "rootDir": "./src",
+    // Activation de toutes les vérifications strictes de typage (Sécurité du code & CWE-704)
+    "strict": true,
+    // Interdit les variables locales inutilisées pour éviter le code mort
+    "noUnusedLocals": true,
+    // Interdit les paramètres de fonction non utilisés
+    "noUnusedParameters": true,
+    // Interdit les retours implicites dans les fonctions
+    "noImplicitReturns": true,
+    // Interopérabilité complète avec les modules CommonJS
+    "esModuleInterop": true,
+    // Génère les fichiers de mapping pour faciliter le débogage
+    "sourceMap": true,
+    // Ignore la vérification des fichiers de déclaration de types tiers pour accélérer la compilation
+    "skipLibCheck": true
+  },
+  // Répertoires à inclure dans la compilation
+  "include": ["src/**/*"],
+  // Répertoires exclus de la compilation
+  "exclude": ["node_modules", "dist", "logs"]
+}
+

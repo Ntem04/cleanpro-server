@@ -1,0 +1,156 @@
+// Prisma Schema pour l'API CleanPro (PostgreSQL)
+// Architecture MVC Multicouche & Normalisation BDD
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Modèle Utilisateurs (Administrateurs & Équipe) ──────────────────────────
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String    // Hash bcrypt / argon2
+  name          String
+  role          String    @default("admin") // "Super Administrateur" | "Administrateur" | "Responsable d'agence"
+  avatarUrl     String?
+  isCurrentUser Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  logs          Log[]
+
+  @@map("users")
+}
+
+// ─── Modèle Catalogue des Services (Prestations) ─────────────────────────────
+model Service {
+  id          String   @id // ex: "bureaux", "residences", "industries", "espaces-publics"
+  title       String
+  description String   @db.Text
+  image       String
+  prestations String[] // Liste des prestations incluses (support PostgreSQL natif)
+  status      String   @default("disponible") // "disponible" | "indisponible" | "desactive"
+  badgeLabel  String?  @default("Disponible")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("services")
+}
+
+// ─── Modèle Planning d'Interventions ─────────────────────────────────────────
+model PlanningSlot {
+  id            String   @id @default(uuid())
+  day           String   // ex: "Mardi 16 septembre"
+  dateFormatted String   // ex: "16/09/2025"
+  title         String   // ex: "Nettoyage de bureaux"
+  location      String   // ex: "Siège social – Yaoundé"
+  startTime     String   // ex: "08:00"
+  endTime       String   // ex: "12:00"
+  team          String   // ex: "Équipe Alpha"
+  category      String   // "bureau" | "residence" | "industrie" | "evenement"
+  colorTheme    String?  @default("emerald")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("planning_slots")
+}
+
+// ─── Modèle Messages & Demandes Clients (Boîte de Réception) ─────────────────
+model Message {
+  id        String   @id @default(uuid())
+  sender    String   // Nom du client / expéditeur
+  subtitle  String?  // Description courte ou sujet affiché
+  source    String   @default("Formulaire de contact web")
+  snippet   String?  // Extrait pour l'aperçu dans la liste
+  email     String
+  subject   String?
+  content   String   @db.Text
+  date      String   // Date lisible (ex: "Septembre 2025")
+  status    String   @default("unread") // "unread" | "read" | "archived"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("messages")
+}
+
+// ─── Modèle Logs (Audit & Technique - Conforme OWASP & RGPD) ─────────────────
+model Log {
+  id        String   @id @default(uuid())
+  timestamp DateTime @default(now())
+  type      String   // "audit" | "technical"
+  level     String   @default("info") // "info" | "warning" | "error" | "critical"
+  user      String   @default("Système")
+  userEmail String?
+  action    String
+  target    String
+  ipAddress String   @default("127.0.0.1")
+  result    String   @default("success") // "success" | "failure"
+  details   String   @db.Text
+  metadata  Json?
+  userId    String?
+  userRel   User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@map("logs")
+}
+
+// ─── Modèle Paramètres Entreprise & Coordonnées ──────────────────────────────
+model Settings {
+  id               String   @id @default("singleton")
+  companyName      String   @default("CleanPro SARL")
+  companySignature String   @default("CleanPro – Votre partenaire propreté et hygiène.")
+  logoUrl          String?
+  phone            String   @default("+237 600 000 000")
+  whatsapp         String   @default("+237 600 000 000")
+  email            String   @default("contact@cleanpro.cm")
+  address          String   @default("Boulevard de la Liberté, Douala, Cameroun")
+  officeNote       String?
+  weekdaysHours    String   @default("07:30 – 18:30")
+  saturdayHours    String   @default("08:00 – 16:00")
+  sundayHours      String   @default("Urgences sur demande")
+  visitorsHours    String   @default("08:30 – 17:30")
+  notifications    Json?
+  updatedAt        DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ─── Modèle Télémétrie Visiteurs & Détection d'Attaquants (Normalisé) ──────
+model PageVisit {
+  id          String   @id @default(uuid())
+  path        String
+  ipAddress   String
+  visitorId   String?  // Identifiant unique normalisé du visiteur (dé-duplication)
+  visitorType String   @default("visiteur") // "visiteur" | "attaquant"
+  label       String   @default("Visiteur légitime") // "Visiteur légitime" | "Attaquant (Bot / Sonde)"
+  userAgent   String?
+  location    String?
+  status      Int      @default(200)
+  details     String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  @@index([visitorType])
+  @@index([createdAt])
+  @@index([visitorId])
+  @@index([path, visitorId])
+  @@map("page_visits")
+}
+
+// ─── Modèle Dénormalisé de Synthèse par Page (Agrégation & Métriques Rapides) ─
+model PageStat {
+  id             String    @id @default(uuid())
+  path           String    @unique
+  title          String
+  uniqueVisitors Int       @default(0)
+  totalHits      Int       @default(0)
+  lastVisitAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([path])
+  @@map("page_stats")
+}
