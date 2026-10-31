@@ -27,11 +27,17 @@ export function getGmailConfig() {
 export function createMailerTransporter(): Transporter {
   const { user, pass } = getGmailConfig();
   return nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true, // SSL direct via le port 465 (indispensable sur Render pour éviter les timeouts du port 587)
     auth: {
       user,
       pass,
     },
+    tls: {
+      rejectUnauthorized: true,
+    },
+    connectionTimeout: 10000,
   });
 }
 
