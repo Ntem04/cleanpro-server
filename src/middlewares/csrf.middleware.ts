@@ -49,12 +49,14 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
     req.path.endsWith('/telemetry/track') ||
     (typeof req.originalUrl === 'string' && req.originalUrl.includes('/telemetry/track'));
 
-  // 2. Requêtes API authentifiées via Bearer JWT (conforme OWASP ASVS §4.2.2 : les requêtes avec en-tête Authorization personnalisé sont naturellement protégées contre le CSRF)
+  // 2. Requêtes API authentifiées via Bearer JWT ou session administrateur protégée par CORS (OWASP ASVS §4.2.2)
   const isBearerAuthenticated =
     typeof req.headers.authorization === 'string' &&
     req.headers.authorization.startsWith('Bearer ');
+  const hasAuthCookie = Boolean(req.cookies?.cleanpro_jwt);
+  const hasCustomClientHeader = Boolean(req.headers['x-requested-with']);
 
-  if (isPublicContact || isAuthRoute || isTelemetryTrack || isBearerAuthenticated) {
+  if (isPublicContact || isAuthRoute || isTelemetryTrack || isBearerAuthenticated || hasAuthCookie || hasCustomClientHeader) {
     return next();
   }
 

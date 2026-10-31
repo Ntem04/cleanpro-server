@@ -413,8 +413,9 @@ export const contactController = {
       } catch {
         // Ignorer
       }
+      // CWE-209 : Masquage strict de la cause technique interne envers le client
       res.status(500).json(
-        sendResponse(false, `Échec de l'envoi de l'e-mail : ${(error as Error).message}`)
+        sendResponse(false, "Impossible d'expédier la réponse par e-mail pour le moment. Veuillez réessayer ultérieurement.")
       );
     }
   },
