@@ -16,7 +16,6 @@ dotenv.config();
  * Sécurité : Utilise un mot de passe d'application Google (App Password)
  * Les identifiants sont strictement chargés depuis process.env (jamais codés en dur)
  */
-
 export function getGmailConfig() {
   const user = process.env.GMAIL_USER?.trim();
   const pass = process.env.GMAIL_APP_PASSWORD?.replace(/\s+/g, '').trim();
@@ -29,7 +28,7 @@ export function createMailerTransporter(): Transporter {
   return nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
-    secure: true, // SSL direct via le port 465 (indispensable sur Render pour éviter les timeouts du port 587)
+    secure: true, // SSL direct via le port 465 (indispensable sur Cloud pour éviter les blocages de port)
     auth: {
       user,
       pass,
@@ -47,6 +46,19 @@ export const mailerTransporter: Transporter = createMailerTransporter();
  * Vérifie la configuration et la connectivité SMTP au démarrage de l'application
  */
 export async function verifyMailerConnection(): Promise<boolean> {
+  const brevoApiKey = process.env.BREVO_API_KEY?.trim();
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+
+  if (brevoApiKey) {
+    console.log('✅ [Mailer] Mode HTTP API actif via Brevo (Port 443 HTTPS)');
+    return true;
+  }
+
+  if (resendApiKey) {
+    console.log('✅ [Mailer] Mode HTTP API actif via Resend (Port 443 HTTPS)');
+    return true;
+  }
+
   const { user, pass } = getGmailConfig();
 
   if (!user || !pass || user.includes('votre_adresse') || pass.includes('votre_mot_de_passe')) {
@@ -81,6 +93,103 @@ export interface SendReplyMailParams {
   originalMessageSnippet?: string;
 }
 
+interface DispatchEmailOptions {
+  fromName: string;
+  fromEmail: string;
+  toEmail: string;
+  replyTo?: string;
+  subject: string;
+  text: string;
+  html: string;
+}
+
+/**
+ * Expéditeur universel d'e-mails :
+ * 1. Brevo HTTP API (Port 443 HTTPS - Jamais bloqué par les pare-feux Cloud de Render Free)
+ * 2. Resend HTTP API (Port 443 HTTPS)
+ * 3. Fallback SMTP Nodemailer (Port 465 SSL)
+ */
+async function dispatchEmail(options: DispatchEmailOptions): Promise<{ messageId: string }> {
+  const brevoApiKey = process.env.BREVO_API_KEY?.trim();
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+
+  // 1. Priorité Cloud : Brevo HTTP REST API (Port 443 HTTPS standard)
+  if (brevoApiKey) {
+    try {
+      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'accept': 'application/json',
+          'api-key': brevoApiKey,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: options.fromName, email: options.fromEmail },
+          to: [{ email: options.toEmail }],
+          replyTo: options.replyTo ? { email: options.replyTo } : undefined,
+          subject: options.subject,
+          textContent: options.text,
+          htmlContent: options.html,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Brevo HTTP API ${response.status}: ${errorBody}`);
+      }
+
+      const data = (await response.json()) as { messageId?: string };
+      console.log(`✅ [Mailer] E-mail transmis avec succès via Brevo HTTP API (ID: ${data.messageId})`);
+      return { messageId: data.messageId || `brevo-${Date.now()}` };
+    } catch (brevoErr) {
+      console.warn('⚠️ [Mailer] Échec via Brevo HTTP API, bascule sur le transporteur suivant :', (brevoErr as Error).message);
+    }
+  }
+
+  // 2. Priorité Cloud : Resend HTTP REST API (Port 443 HTTPS standard)
+  if (resendApiKey) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: `${options.fromName} <onboarding@resend.dev>`,
+          to: [options.toEmail],
+          reply_to: options.replyTo,
+          subject: options.subject,
+          text: options.text,
+          html: options.html,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Resend HTTP API ${response.status}: ${errorBody}`);
+      }
+
+      const data = (await response.json()) as { id?: string };
+      console.log(`✅ [Mailer] E-mail transmis avec succès via Resend HTTP API (ID: ${data.id})`);
+      return { messageId: data.id || `resend-${Date.now()}` };
+    } catch (resendErr) {
+      console.warn('⚠️ [Mailer] Échec via Resend HTTP API, bascule sur SMTP :', (resendErr as Error).message);
+    }
+  }
+
+  // 3. Fallback standard : Transporteur SMTP Nodemailer (Port 465 SSL)
+  const transporter = createMailerTransporter();
+  return transporter.sendMail({
+    from: `"${options.fromName}" <${options.fromEmail}>`,
+    to: options.toEmail,
+    replyTo: options.replyTo,
+    subject: options.subject,
+    text: options.text,
+    html: options.html,
+  });
+}
+
 /**
  * Envoie une notification e-mail à l'administrateur lors de la soumission du formulaire de contact public
  */
@@ -112,31 +221,35 @@ Pour répondre directement à ce visiteur, cliquez simplement sur "Répondre" da
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; background-color: #f8fafc; margin: 0; padding: 20px; }
     .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
     .header { background: #135d3b; padding: 24px; text-align: center; color: #ffffff; }
-    .header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+    .header h1 { margin: 0; font-size: 20px; font-weight: 700; }
     .content { padding: 30px 24px; }
-    .badge { display: inline-block; padding: 4px 12px; background: #e0f2fe; color: #0369a1; border-radius: 9999px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
+    .badge { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
     .info-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-    .info-table td { padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
-    .info-table td.label { font-weight: 600; color: #64748b; width: 120px; }
-    .message-box { background: #f8fafc; border-left: 4px solid #135d3b; padding: 16px; border-radius: 0 8px 8px 0; font-size: 14px; white-space: pre-wrap; margin-bottom: 24px; }
-    .btn { display: inline-block; background: #135d3b; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; }
+    .info-table td { padding: 8px 0; font-size: 14px; border-bottom: 1px solid #f1f5f9; }
+    .info-table td.label { width: 130px; font-weight: 600; color: #64748b; }
+    .message-box { background: #f8fafc; border-left: 4px solid #135d3b; padding: 16px; border-radius: 0 8px 8px 0; font-size: 14px; color: #0f172a; white-space: pre-wrap; }
     .footer { background: #f8fafc; padding: 16px 24px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; }
+    .btn { display: inline-block; background: #135d3b; color: #ffffff !important; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; margin-top: 20px; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>CleanPro — Nouveau message reçu</h1>
+      <h1>CleanPro — Notification Client</h1>
     </div>
     <div class="content">
-      <span class="badge">Ticket : ${params.referenceId}</span>
+      <span class="badge">Nouveau message reçu</span>
       <table class="info-table">
+        <tr>
+          <td class="label">Référence :</td>
+          <td><strong>${escapeHtml(params.referenceId)}</strong></td>
+        </tr>
         <tr>
           <td class="label">Expéditeur :</td>
           <td><strong>${escapeHtml(params.name)}</strong></td>
         </tr>
         <tr>
-          <td class="label">E-mail :</td>
+          <td class="label">Adresse e-mail :</td>
           <td><a href="mailto:${escapeHtml(params.email)}" style="color: #135d3b;">${escapeHtml(params.email)}</a></td>
         </tr>
         <tr>
@@ -165,14 +278,12 @@ Pour répondre directement à ce visiteur, cliquez simplement sur "Répondre" da
 </html>
 `;
 
-  // Envoi effectif via le transporteur Gmail Nodemailer
   const { user, recipient } = getGmailConfig();
-  const transporter = createMailerTransporter();
-
-  return transporter.sendMail({
-    from: `"CleanPro Notification" <${user}>`,
-    to: recipient,
-    replyTo: `"${params.name}" <${params.email}>`,
+  return dispatchEmail({
+    fromName: 'CleanPro Notification',
+    fromEmail: user || 'contact@cleanpro.cm',
+    toEmail: recipient || user || 'frankyenspd@gmail.com',
+    replyTo: params.email,
     subject: mailSubject,
     text: textVersion,
     html: htmlVersion,
@@ -259,12 +370,11 @@ www.cleanpro.cm
 `;
 
   const { user } = getGmailConfig();
-  const transporter = createMailerTransporter();
-
-  return transporter.sendMail({
-    from: `"CleanPro Service Client" <${user}>`,
-    to: params.recipientEmail,
-    replyTo: user,
+  return dispatchEmail({
+    fromName: 'CleanPro Service Client',
+    fromEmail: user || 'contact@cleanpro.cm',
+    toEmail: params.recipientEmail,
+    replyTo: user || 'contact@cleanpro.cm',
     subject: mailSubject,
     text: textVersion,
     html: htmlVersion,
@@ -282,4 +392,3 @@ function escapeHtml(unsafe: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 }
-
