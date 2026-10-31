@@ -43,15 +43,37 @@ export function createMailerTransporter(): Transporter {
 export const mailerTransporter: Transporter = createMailerTransporter();
 
 /**
- * Vérifie la configuration et la connectivité SMTP au démarrage de l'application
+ * Vérifie la configuration et la connectivité SMTP / HTTP API au démarrage de l'application
+ * Conforme OWASP ASVS §13.2 (Vérification proactive des dépendances réseau)
  */
 export async function verifyMailerConnection(): Promise<boolean> {
   const brevoApiKey = process.env.BREVO_API_KEY?.trim();
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
 
   if (brevoApiKey) {
-    console.log('✅ [Mailer] Mode HTTP API actif via Brevo (Port 443 HTTPS)');
-    return true;
+    try {
+      // Test de validité de la clé API Brevo via l'endpoint officiel /v3/account
+      const res = await fetch('https://api.brevo.com/v3/account', {
+        headers: {
+          'accept': 'application/json',
+          'api-key': brevoApiKey,
+        },
+        signal: AbortSignal.timeout(6000), // CWE-400 : timeout strict
+      });
+
+      if (res.ok) {
+        const acc = (await res.json()) as { email?: string; companyName?: string };
+        console.log(`✅ [Mailer] API Brevo authentifiée et active pour le compte : ${acc.email || 'CleanPro'}`);
+        return true;
+      } else {
+        const err = await res.text();
+        console.error(`❌ [Mailer] Clé API Brevo invalide ou rejetée (${res.status}) : ${err}`);
+        return false;
+      }
+    } catch (e) {
+      console.warn('⚠️ [Mailer] Vérification API Brevo temporairement inaccessible :', (e as Error).message);
+      return true; // Ne bloque pas le démarrage
+    }
   }
 
   if (resendApiKey) {
@@ -113,37 +135,44 @@ async function dispatchEmail(options: DispatchEmailOptions): Promise<{ messageId
   const brevoApiKey = process.env.BREVO_API_KEY?.trim();
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
 
-  // 1. Priorité Cloud : Brevo HTTP REST API (Port 443 HTTPS standard)
+  // 1. Priorité Cloud : Brevo HTTP REST API (Port 443 HTTPS standard - Conforme OWASP & ANSSI)
   if (brevoApiKey) {
-    try {
-      const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'accept': 'application/json',
-          'api-key': brevoApiKey,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          sender: { name: options.fromName, email: options.fromEmail },
-          to: [{ email: options.toEmail }],
-          replyTo: options.replyTo ? { email: options.replyTo } : undefined,
-          subject: options.subject,
-          textContent: options.text,
-          htmlContent: options.html,
-        }),
-      });
+    const verifiedSender = process.env.BREVO_SENDER_EMAIL?.trim() || process.env.GMAIL_USER?.trim() || options.fromEmail;
 
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`Brevo HTTP API ${response.status}: ${errorBody}`);
-      }
-
-      const data = (await response.json()) as { messageId?: string };
-      console.log(`✅ [Mailer] E-mail transmis avec succès via Brevo HTTP API (ID: ${data.messageId})`);
-      return { messageId: data.messageId || `brevo-${Date.now()}` };
-    } catch (brevoErr) {
-      console.warn('⚠️ [Mailer] Échec via Brevo HTTP API, bascule sur le transporteur suivant :', (brevoErr as Error).message);
+    // Assainissement de l'email replyTo (CWE-20 : extraction d'adresse email stricte)
+    let cleanReplyTo = options.replyTo?.trim();
+    if (cleanReplyTo && cleanReplyTo.includes('<')) {
+      const match = cleanReplyTo.match(/<([^>]+)>/);
+      if (match) cleanReplyTo = match[1];
     }
+
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'accept': 'application/json',
+        'api-key': brevoApiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: { name: options.fromName, email: verifiedSender },
+        to: [{ email: options.toEmail.trim().toLowerCase() }],
+        replyTo: cleanReplyTo ? { email: cleanReplyTo } : undefined,
+        subject: options.subject,
+        textContent: options.text,
+        htmlContent: options.html,
+      }),
+      signal: AbortSignal.timeout(10000), // CWE-400 : protection contre les blocages réseau
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`❌ [Brevo API Error] ${response.status} : ${errorBody}`);
+      throw new Error(`Brevo HTTP API (${response.status}) : ${errorBody}`);
+    }
+
+    const data = (await response.json()) as { messageId?: string };
+    console.log(`✅ [Mailer] E-mail transmis avec succès via Brevo HTTP API (ID: ${data.messageId})`);
+    return { messageId: data.messageId || `brevo-${Date.now()}` };
   }
 
   // 2. Priorité Cloud : Resend HTTP REST API (Port 443 HTTPS standard)
