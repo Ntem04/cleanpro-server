@@ -18,6 +18,11 @@ import { globalErrorHandler } from './middlewares/errorHandler.js';
 // Création de l'instance de l'application Express
 const app: Application = express();
 
+// ─── 0. Trust Proxy (Render / Vercel / Nginx reverse proxy) ─────────────────
+// Obligatoire sur Render : les requêtes arrivent derrière un load balancer
+// qui injecte X-Forwarded-For. Sans cette ligne, express-rate-limit plante.
+app.set('trust proxy', 1);
+
 // ─── 1. En-têtes de Sécurité HTTP & HSTS (Helmet) ───────────────────────────
 // Conforme OWASP & ANSSI : HSTS forcé sur 1 an avec sous-domaines, no-sniff, deny iframe
 app.use(
