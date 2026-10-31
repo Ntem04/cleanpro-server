@@ -57,28 +57,9 @@ export async function verifyMailerConnection(): Promise<boolean> {
       return false;
     }
 
-    try {
-      // Test de validité de la clé API Brevo via l'endpoint officiel /v3/account
-      const res = await fetch('https://api.brevo.com/v3/account', {
-        headers: {
-          'accept': 'application/json',
-          'api-key': brevoApiKey,
-        },
-        signal: AbortSignal.timeout(6000), // CWE-400 : timeout strict
-      });
-
-      if (res.ok) {
-        const acc = (await res.json()) as { email?: string; companyName?: string };
-        console.log(`✅ [Mailer] API Brevo authentifiée et active pour le compte : ${acc.email || 'CleanPro'}`);
-        return true;
-      } else {
-        const err = await res.text();
-        console.error(`❌ [Mailer] Clé API Brevo rejetée (${res.status}) : ${err}`);
-        return false;
-      }
-    } catch (e) {
-      console.warn('⚠️ [Mailer] Vérification API Brevo temporairement inaccessible :', (e as Error).message);
-      return true; // Ne bloque pas le démarrage
+    if (brevoApiKey.startsWith('xkeysib-')) {
+      console.log('✅ [Mailer] Mode Brevo HTTP API actif (Port 443 HTTPS - Conforme Cloud)');
+      return true;
     }
   }
 

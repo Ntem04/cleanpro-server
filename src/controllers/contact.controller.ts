@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { prisma } from '../config/prisma.js';
 import { contactService, MessageStatus } from '../services/contact.service.js';
 import { sendResponse } from '../utils/apiResponse.js';
 import { logSecurityIncident } from '../middlewares/securityLogger.js';
@@ -353,8 +354,9 @@ export const contactController = {
    * Envoie la réponse de l'administrateur par e-mail au visiteur via Nodemailer (Gmail)
    */
   async reply(req: Request, res: Response, _next: NextFunction): Promise<void> {
+    const id = String(req.params.id);
+    const ipAddress = getClientIp(req);
     try {
-      const id = String(req.params.id);
       const { replyContent, recipientEmail } = req.body;
 
       if (!replyContent || typeof replyContent !== 'string' || replyContent.trim().length < 2) {
@@ -367,7 +369,6 @@ export const contactController = {
         return;
       }
 
-      const ipAddress = getClientIp(req);
       const result = await contactService.replyToMessage(
         id,
         replyContent.trim(),
@@ -395,9 +396,25 @@ export const contactController = {
         })
       );
     } catch (error) {
-      console.error('Erreur SMTP lors de l’envoi de la réponse :', error);
+      console.error('Erreur lors de l’envoi de la réponse :', error);
+      try {
+        await prisma.log.create({
+          data: {
+            type: 'technical',
+            level: 'warning',
+            user: 'Administrateur',
+            action: 'Échec d’envoi de réponse e-mail',
+            target: id,
+            ipAddress,
+            result: 'failure',
+            details: `Réponse e-mail échouée pour le message ${id} : ${(error as Error).message}`,
+          },
+        });
+      } catch {
+        // Ignorer
+      }
       res.status(500).json(
-        sendResponse(false, `Échec de l'envoi de l'e-mail (erreur SMTP) : ${(error as Error).message}`)
+        sendResponse(false, `Échec de l'envoi de l'e-mail : ${(error as Error).message}`)
       );
     }
   },
