@@ -36,8 +36,14 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
   }
 
   // Exemptions ciblées et contrôlées (ex: formulaire de contact public de visiteurs externes, routes auth et balise télémétrique anonyme)
-  const isPublicContact = req.path === '/contact' || req.path === '/api/v1/contact' || req.path === '/api/contact';
-  const isAuthRoute = req.path.endsWith('/auth/login') || req.path.endsWith('/auth/logout');
+  const isPublicContact =
+    req.path === '/contact' ||
+    req.path.endsWith('/contact') ||
+    (typeof req.originalUrl === 'string' && req.originalUrl.includes('/contact'));
+  const isAuthRoute =
+    req.path.endsWith('/auth/login') ||
+    req.path.endsWith('/auth/logout') ||
+    (typeof req.originalUrl === 'string' && req.originalUrl.includes('/auth/'));
   const isTelemetryTrack =
     req.path.endsWith('/telemetry/track') ||
     (typeof req.originalUrl === 'string' && req.originalUrl.includes('/telemetry/track'));

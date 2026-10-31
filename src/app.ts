@@ -81,9 +81,10 @@ app.use(securityProbeDetector);
 // Protection CSRF avec émission et validation des jetons
 app.use(csrfProtection);
 
-// ─── 5. Montage des Routes Versionnées (/api/v1 et alias /api) ────────────────
+// ─── 5. Montage des Routes Versionnées (/api/v1, /api et fallback racine /) ──
 app.use('/api/v1', routes);
 app.use('/api', routes);
+app.use('/', routes); // Permet de répondre même si le client oublie le préfixe /api (ex: POST /contact)
 
 // Route d'accueil racine pour vérifier la disponibilité générale
 app.get('/', (_req: Request, res: Response) => {
