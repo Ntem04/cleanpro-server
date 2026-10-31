@@ -51,6 +51,12 @@ export async function verifyMailerConnection(): Promise<boolean> {
   const resendApiKey = process.env.RESEND_API_KEY?.trim();
 
   if (brevoApiKey) {
+    if (brevoApiKey.startsWith('xsmtpsib-')) {
+      console.error('❌ [Mailer Erreur Clé] Vous avez configuré une clé SMTP (xsmtpsib-...) au lieu d\'une clé API HTTP (xkeysib-...).');
+      console.error('   👉 Rendez-vous dans Brevo > Menu Compte > "SMTP & API" > Cliquez sur l\'onglet "API Keys" (et NON l\'onglet SMTP) > "Generate a new API key".');
+      return false;
+    }
+
     try {
       // Test de validité de la clé API Brevo via l'endpoint officiel /v3/account
       const res = await fetch('https://api.brevo.com/v3/account', {
@@ -67,7 +73,7 @@ export async function verifyMailerConnection(): Promise<boolean> {
         return true;
       } else {
         const err = await res.text();
-        console.error(`❌ [Mailer] Clé API Brevo invalide ou rejetée (${res.status}) : ${err}`);
+        console.error(`❌ [Mailer] Clé API Brevo rejetée (${res.status}) : ${err}`);
         return false;
       }
     } catch (e) {
@@ -137,6 +143,10 @@ async function dispatchEmail(options: DispatchEmailOptions): Promise<{ messageId
 
   // 1. Priorité Cloud : Brevo HTTP REST API (Port 443 HTTPS standard - Conforme OWASP & ANSSI)
   if (brevoApiKey) {
+    if (brevoApiKey.startsWith('xsmtpsib-')) {
+      throw new Error('Clé Brevo invalide : vous utilisez une clé SMTP (xsmtpsib-...) au lieu d\'une clé API HTTP (xkeysib-...). Allez dans Brevo > SMTP & API > onglet "API Keys".');
+    }
+
     const verifiedSender = process.env.BREVO_SENDER_EMAIL?.trim() || process.env.GMAIL_USER?.trim() || options.fromEmail;
 
     // Assainissement de l'email replyTo (CWE-20 : extraction d'adresse email stricte)
