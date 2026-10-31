@@ -38,8 +38,10 @@ app.use(
 // Optimisation payload & sécurité : masquage strict de la signature serveur (CWE-200)
 app.disable('x-powered-by');
 
+const rawClientUrl = process.env.CLIENT_URL?.trim();
 const allowedOrigins = [
-  process.env.CLIENT_URL,
+  rawClientUrl,
+  rawClientUrl?.replace(/\/$/, ''),
   'http://localhost:5173',
   'http://localhost:3000',
 ].filter(Boolean) as string[];
@@ -48,10 +50,18 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
+      // Autorise les requêtes sans origine (ex: curl, mobile) ou les origines autorisées
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1') ||
+        process.env.NODE_ENV === 'development'
+      ) {
         callback(null, true);
       } else {
-        callback(new Error('Origine non autorisée par la politique CORS'));
+        callback(new Error(`Origine non autorisée par la politique CORS : ${origin}`));
       }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
