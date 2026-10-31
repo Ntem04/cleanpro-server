@@ -32,12 +32,12 @@ export const authController = {
         return;
       }
 
-      // Émission du jeton exclusivement en Cookie HttpOnly (Anti-XSS absolu, OWASP A07 & CWE-312)
-      // Le token JWT n'est JAMAIS renvoyé dans le corps JSON pour empêcher tout vol par script JS (XSS).
+      // Émission du jeton en Cookie HttpOnly (SameSite=None pour compatibilité cross-origin Vercel -> Render)
+      const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('cleanpro_jwt', result.token, {
-        httpOnly: true, // Inaccessible aux scripts client / document.cookie
-        secure: process.env.NODE_ENV === 'production', // Forcé HTTPS en production
-        sameSite: 'lax', // Protection anti-CSRF native
+        httpOnly: true, // Inaccessible aux scripts client
+        secure: isProduction, // HTTPS requis avec SameSite=None
+        sameSite: isProduction ? 'none' : 'lax', // 'none' pour autoriser l'envoi cross-site Vercel -> Render
         maxAge: 8 * 60 * 60 * 1000, // 8 heures
         path: '/',
       });
@@ -45,6 +45,7 @@ export const authController = {
       res.status(200).json(
         sendResponse(true, 'Connexion réussie', {
           user: result.user,
+          token: result.token, // Fourni en fallback Bearer token pour immunité cross-origin totale
         })
       );
     } catch (error) {
@@ -58,10 +59,11 @@ export const authController = {
    */
   async logout(_req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      const isProduction = process.env.NODE_ENV === 'production';
       res.clearCookie('cleanpro_jwt', {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
         path: '/',
       });
 
