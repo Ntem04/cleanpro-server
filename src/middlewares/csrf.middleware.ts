@@ -35,7 +35,8 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
     return next();
   }
 
-  // Exemptions ciblées et contrôlées (ex: formulaire de contact public de visiteurs externes, routes auth et balise télémétrique anonyme)
+  // Exemptions ciblées et contrôlées :
+  // 1. Formulaire de contact public, routes auth, balise télémétrique
   const isPublicContact =
     req.path === '/contact' ||
     req.path.endsWith('/contact') ||
@@ -48,7 +49,12 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
     req.path.endsWith('/telemetry/track') ||
     (typeof req.originalUrl === 'string' && req.originalUrl.includes('/telemetry/track'));
 
-  if (isPublicContact || isAuthRoute || isTelemetryTrack) {
+  // 2. Requêtes API authentifiées via Bearer JWT (conforme OWASP ASVS §4.2.2 : les requêtes avec en-tête Authorization personnalisé sont naturellement protégées contre le CSRF)
+  const isBearerAuthenticated =
+    typeof req.headers.authorization === 'string' &&
+    req.headers.authorization.startsWith('Bearer ');
+
+  if (isPublicContact || isAuthRoute || isTelemetryTrack || isBearerAuthenticated) {
     return next();
   }
 
